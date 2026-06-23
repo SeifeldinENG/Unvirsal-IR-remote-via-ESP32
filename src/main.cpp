@@ -4,6 +4,8 @@
 
 #define IRPin 15
 
+int counter = 0;
+
 void setup() {
   Serial.begin(115200);
   delay(300);
@@ -36,20 +38,31 @@ void loop() {
         yield();
       }
 
+      // Checking for dublicates
+      int i = 0;
+      for (JsonObject entry : signals) {
+        if (entry["Code1_" + String(i)] == firstCode) {
+          IrReceiver.resume();
+          return;
+        }
+        i++;
+      }
+
       JsonObject newEntry = signals.add<JsonObject>();
-      newEntry["site"] = "IRDevice";
-      newEntry["Code1"] = firstCode;
+      newEntry["site"] = "IRDevice" + String(counter);
+      newEntry["Code1_" + String(counter)] = firstCode;
       if (secondCode != "") {
-        newEntry["Code2"] = secondCode;
+        newEntry["Code2_" + String(counter)] = secondCode;
         Serial.println("Two signal codes detected!");
       } else {
-        newEntry["Code2"] = "";
+        newEntry["Code2_" + String(counter)] = "";
         Serial.println("One signal code detected");
       }
       serializeJsonPretty(doc, Serial);
 
       // Resuming
       IrReceiver.resume();
+      counter++;
     }
   }
 }
