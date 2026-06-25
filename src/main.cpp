@@ -38,6 +38,7 @@ SELECTOR selector = IDLE;
 void setup() {
   Serial.begin(115200);
   pinMode(BUTTON, INPUT_PULLUP);
+  pinMode(SEND, INPUT_PULLUP);
   devices = doc["Devices"].to<JsonArray>();
   IrReceiver.begin(IRPin, ENABLE_LED_FEEDBACK);
   Serial.println("ready to receive data!");
