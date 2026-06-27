@@ -13,36 +13,43 @@ JsonArray signals;
 // Button globar varibals
 bool buttonPrevState;
 
-// Devices enum  
-enum PLACE {
-  LIVING_ROOM,
-  MY_ROOM
+// Global Selectors  
+String place = {"Living Room", " My Room"};
+String type = {"AC", "TV", "Fan"};
+String AC_Key = {"Power UP", "Power OFF", "Plus", "Minus"};
+String TV_Key = {"Power UP", "Power OFF", "OK"};
+String Fan_Key = {"Power UP", "Power OFF", "Speed"};
+
+int placeIndex = 0;
+int typeIndex = 0;
+int ACIndex = 0;
+int TVIndex = 0;
+int FanIndex = 0;
+
+enum SELECTOR {
+  PLACE,
+  TYPE,
+  KEY
 };
 
-enum TYPE {
+enum DEVICE {
   AC,
   TV,
   FAN
 };
 
-enum SELECTOR {
-  IDLE,
-  PLACE,
-  TYPE
-};
+SELECTOR selector = PLACE;
+DEVICE device = AC;
 
-PLACE place = LIVING_ROOM;
-TYPE type = AC;
-SELECTOR selector = IDLE;
+// True if assigning a signal
+bool newSignalAssing = false;
 
 void setup() {
   Serial.begin(115200);
   pinMode(BUTTON, INPUT_PULLUP);
-  pinMode(SEND, INPUT_PULLUP);
+  pinMode(SWITCH, INPUT_PULLUP);
   devices = doc["Devices"].to<JsonArray>();
   IrReceiver.begin(IRPin, ENABLE_LED_FEEDBACK);
-  Serial.println("ready to receive data!");
-
 }
 
 bool switchButtonClick(bool switchButtonCurrentState) {
@@ -69,106 +76,111 @@ bool sendButtonClick(bool sendButtonCurrentState) {
 
 void updateDisplay() {
   switch (selector) {
+    case (PLACE):
+      Serial.println(place(placeIndex));
+      break;
 
-    case (PLACE): {
-      switch (place) {
-        case (LIVING_ROOM):
-          Serial.println("Living room");
-          place = (place + 1) % 2;
-          break;
-        case (MY_ROOM):
-          Serial.println("My room");
-          place = (place + 1) % 2;
-          break;
-      }
-    } 
+    case (TYPE):
+      Serial.println(type(typeIndex));
+      break;
 
-    case (TYPE): {
-      switch (type) {
+    case (KEY):
+      switch (device) {
         case (AC):
-          Serial.println("AC");
-          type = (type + 1) % 3;
+          Serial.prinln(AC_Key[ACIndex]);
           break;
+
         case (TV):
-          Serial.println("TV");
-          type = (type + 1) % 3;
+          Seiral.println(TV_key[TVIndex]);
           break;
+
         case (FAN):
-          Serial.println("Fan");
-          type = (type + 1) % 3;
+          Serial.println(Fan_Key[FanIndex]);
           break;
-      }
-    }
-    
-    case (IDLE):
-    selector = PLACE;
-    Serial.println("Specify the Location:");
-    break;
-  }
+        }
+      break;
+  } 
 }
 
 void loop() {
-  if (switchButtonClick(digitalRead(SWITCH)) {
+  // Waiting for the switch key to be pressed first
+  // to enter assgin signal mode
+  if (!newSignalAssing) {
+    Serial.println("Enter the SWITCH button key to assign new signal.");
+    while (!switchButtonClick(digitalRead(SWITCH))) {
+      yield(); // tells the esp32 that its not stuck do not reset
+    }
+    newSignalAssing = true;
     updateDisplay();
-    selector = ((selector + 1) % 2) + 1;
+    JsonObject newEntry = devices.add<JsonObject>();
+  }
+
+  if (switchButtonClick(digitalRead(SWITCH)) {
+    // Updating the selector indexes
+    switch (selector) {
+      case (PLACE):
+        placeIndex = (placeIndex + 1) % length(place);
+        break;
+
+      case (TYPE):
+        typeIndex = (typeIndex + 1) % length(type);
+        break;
+      
+      case (KEY):
+        switch (device) {
+          case (AC):
+            ACIndex = (ACIndex + 1) % length(AC_Key);
+            break;
+
+          case (TV):
+            TVIndex = (TVIndex + 1) % length(TV_Key);
+            break;
+
+          case (FAN):
+            FanIndex = (FanIndex + 1) % length(Fan_Key);
+            break;
+        }
+    }
+    updateDisplay();
   }
 
   if (sendButtonClick(digitalRead(SEND))) {
-    // CODE
-  }
 
-  if (!IrReceiver.decode()) { return; }
-
-  // if (IrReceiver.decodedIRData.protocol == 0 || 
-  //     IrReceiver.decodedIRData.protocol == UNKNOWN) {
-  //     Serial.println("Unknown or zero signal detected");
-  //     IrReceiver.resume();
-  //     return;
-  // }
-
-  if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
-    IrReceiver.resume();
-    return;
-  }
-
-  String firstCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
-  IrReceiver.resume();
-
-  //Waiting for second signal
-  String secondCode = "";
-  unsigned long sentTime = millis();
-  while (millis() - sentTime < 150) {
-    if (IrReceiver.decode()) {
-        secondCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
-        IrReceiver.resume();
+    //  Saving the Choosen variable in the JSON  
+    switch (selector) {
+      case (PLACE):
+        newEntry["Place"] = place[placeIndex]; 
+        selector = TYPE;
+        updateDisplay();
         break;
+
+      case (TYPE):
+        newEntry["Type"] = type[typeIndex];
+        selector = KEY;
+        updateDisplay();
+        break;
+
+      case (KEY):
+        switch (device) {
+          case (AC):
+            newEntry["Key"] = AC_Key[ACIndex];
+            break;
+            
+          case (TV):
+            newEntry["Key"] = TV_Key[TVIndex];
+            break;
+
+          case (FAN):
+            newEntry["Key"] = Fan_Key[FanIndex];
+            break;
+        }
+        placeIndex = 0;
+        typeIndex = 0;
+        ACIndex = 0;
+        TVIndex = 0;
+        FanIndex = 0;
+        newSignalAssing = false;
     }
-    IrReceiver.resume();
-    yield();
   }
-
-  // Checking for dublicates
-  // for (JsonObject entry : signals) {
-  //   if (entry["Code1"].as<String>() == firstCode) {
-  //     IrReceiver.resume();
-  //     return;
-  //   }
-  // }
-
-  JsonObject newEntry = signals.add<JsonObject>();
-  newEntry["site"] = "IRDevice" + String(counter);
-  newEntry["Code1"] = firstCode;
-  if (secondCode != "") {
-    newEntry["Code2"] = secondCode;
-    Serial.println("Two signal codes detected!");
-  } else {
-    newEntry["Code2"] = "";
-    Serial.println("One signal code detected");
-  }
-  serializeJsonPretty(doc, Serial);
-
-  // Resuming
-  IrReceiver.resume();
-  counter++;
 }
 
