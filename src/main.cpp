@@ -130,6 +130,42 @@ void waitForRelease() {
   delay(30); // small delay time after release
 }
 
+bool signalAssign() {
+if (!IrReceiver.decode()) { return false; }
+
+  if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
+    IrReceiver.resume();
+    return false;
+  }
+
+  String firstCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
+  IrReceiver.resume();
+
+  //Waiting for second signal
+  String secondCode = "";
+  unsigned long sentTime = millis();
+  while (millis() - sentTime < 150) {
+    if (IrReceiver.decode()) {
+        secondCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
+        IrReceiver.resume();
+        break;
+    }
+    IrReceiver.resume();
+    yield();
+  }
+
+  newEntry["Code1"] = firstCode;
+  if (secondCode != "") {
+    newEntry["Code2"] = secondCode;
+  } else {
+    newEntry["Code2"] = "";
+  }
+
+  // Resuming
+  IrReceiver.resume();
+  return true;
+}
+
 void loop() {
   // Waiting for the switch key to be pressed first
   // to enter assgin signal mode
@@ -207,6 +243,11 @@ void loop() {
             newEntry["Key"] = Fan_Key[FanIndex];
             break;
         }
+        // Ask to send the signal and wait
+        Serial.println("Please direct the remote to the remote and press the button.");
+        while (!signalAssign()) {
+          yield();
+        } 
         // Printing the final Json
         serializeJsonPretty(doc, Serial);
         Serial.println(" ");
