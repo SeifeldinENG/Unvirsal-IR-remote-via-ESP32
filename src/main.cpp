@@ -1,10 +1,14 @@
 #include <Arduino.h>
 #include <IRremote.hpp>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 
 #define IRPin 15
 #define SWITCH 16
 #define SEND 17
+
+// Json saved file path in the esp32
+String filePath = "/Devices/devices.json";
 
 // Json Global Variables
 int counter = 0;
@@ -57,14 +61,81 @@ DEVICE device = AC;
 bool newSignalAssing = false;
 
 // JsonDocument Global Variable
-JsonArray devices = doc["Devices"].to<JsonArray>();
+JsonArray devices; 
 JsonObject newEntry;
 
+
+bool loadJsonFromFlash() {
+  File file = LittleFS.open(filePath, "r");
+
+  if (!file) {
+    Serial.println("Failed to open the file to read!");
+    return false;
+  }
+
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+
+  if (error) {
+    Serial.print("Failed to deserialize the Json :");
+    Serial.println(error.c_str());
+    return false;
+  }
+
+  return true;
+}
+
+bool saveJsonToFlash() {
+  File file = LittleFS.open(filePath, "w");
+
+  if (!file) {
+    Serial.println("Failed to open file to write!");
+    return false;
+  }
+
+  size_t writtenBytes = serializeJson(doc, file);
+  file.close();
+
+  if (writtenBytes == 0) {
+    Serial.println("failed to serialize the Json!");
+    return false;
+  }
+
+  return true;
+}
 void setup() {
   Serial.begin(115200);
+  
+  // Pin Modes
   pinMode(SEND, INPUT_PULLUP);
   pinMode(SWITCH, INPUT_PULLUP);
+  
+  // IrReceiver object 
+  // ENABLE_LED_FEEDBACK uses the esp32 builtin LED
+  // AS an indicator that a signal was picked
   IrReceiver.begin(IRPin, ENABLE_LED_FEEDBACK);
+
+  // LittleFS filesystem mounting
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS mounting failed!");
+  }
+
+  if (!LittleFS.exists("/Devices")) {
+    LittleFS.mkdir("/Devices");
+  }
+
+  // Loading the JsonDocument from memory
+  bool loaded = loadJsonFromFlash(); 
+
+  if (!loaded) {
+    Serial.println("Failed to load the Json file!");
+  }
+
+  if (loaded && doc["Devices"].is<JsonArray>()) {
+    devices = doc["Devices"].as<JsonArray>();
+  } else {
+    devices = doc["Devices"].to<JsonArray>();
+  }
 }
 
 bool switchButtonClick() {
@@ -94,33 +165,51 @@ bool sendButtonClick() {
     }
   return false;
 }
-
+void clearScreen() {
+  // Print empty lines as simulate clearing the screen
+  for (int i = 0; i < 30; i++) {
+    Serial.println();
+  }
+}
 void updateDisplay() {
-  switch (selector) {
-    case (PLACE):
-      Serial.println(place[placeIndex]);
-      break;
+  clearScreen();
 
-    case (TYPE):
-      Serial.println(type[typeIndex]);
-      break;
+  Serial.println("=========================================");
+  Serial.println("        IR SIGNAL CAPTURE MENU           ");
+  Serial.println("=========================================");
 
-    case (KEY):
-      switch (device) {
-        case (AC):
-          Serial.println(AC_Key[ACIndex]);
-          break;
+  if (selector == PLACE) {
+    Serial.print("[>] PLACE: "); Serial.println(place[placeIndex]);
+  } else {
+    // print the place selected and if not selected for some reseaon just print the highlited one
+    Serial.print("    PLACE: "); Serial.println(newEntry["Place"] | place[placeIndex]); 
+  }
 
-        case (TV):
-          Serial.println(TV_Key[TVIndex]);
-          break;
+if (selector == TYPE) {
+    Serial.print("[>] TYPE: "); Serial.println(type[typeIndex]);
+  } else {
+    Serial.print("    TYPE: "); Serial.println(newEntry["Type"] | type[typeIndex]); 
+  }
 
-        case (FAN):
-          Serial.println(Fan_Key[FanIndex]);
-          break;
-        }
-      break;
-  } 
+if (selector == KEY) {
+    Serial.print("[>] KEY: "); 
+    switch (device) {
+      case (AC): Serial.println(AC_Key[ACIndex]); break;
+      case (TV): Serial.println(TV_Key[TVIndex]); break;
+      case (FAN): Serial.println(Fan_Key[FanIndex]); break;
+    }
+  } else {
+    Serial.print("    KEY: ");
+    if (newEntry["Key"]) {
+      Serial.println(newEntry["Key"].as<String>());
+    } else {
+      Serial.println("----");
+    }
+  }
+
+  Serial.println("=========================================");
+  Serial.println(" [SWITCH]: Next Item  |  [SEND]: Confirm ");
+  Serial.println("=========================================");
 }
 
 void waitForRelease() {
@@ -244,14 +333,25 @@ void loop() {
             break;
         }
         // Ask to send the signal and wait
-        Serial.println("Please direct the remote to the remote and press the button.");
+        clearScreen();
+        Serial.println("=========================================");
+        Serial.println(" >>> WAITING FOR IR SIGNAL...           ");
+        Serial.println("=========================================");
+        Serial.println("Please direct the remote to the receiver");
+        Serial.println("and press the desired button.");
+        Serial.println("=========================================");
+
         while (!signalAssign()) {
           yield();
         } 
         // Printing the final Json
+        clearScreen();
+        Serial.println("=========================================");
+        Serial.println(" >>> SIGNAL SAVED SUCCESSFULLY!         ");
+        Serial.println("=========================================");
         serializeJsonPretty(doc, Serial);
-        Serial.println(" ");
-
+        Serial.println("\n=========================================");
+        
         // Reseting the choices
         selector = PLACE;
         placeIndex = 0;
@@ -260,6 +360,14 @@ void loop() {
         TVIndex = 0;
         FanIndex = 0;
         newSignalAssing = false;
+
+        // Saving the Json in the memory
+        if (!saveJsonToFlash()) {
+          Serial.println("Failed to save the json in the memory!");
+        } else {
+          Serial.println("Saved the Json succesffully");
+        }
+        break;
     }
     waitForRelease();
   }
