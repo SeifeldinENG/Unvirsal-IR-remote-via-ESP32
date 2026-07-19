@@ -2,6 +2,7 @@
 #include <IRremote.hpp>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <WiFi.h>
 
 #define IRPin 15
 #define SWITCH 16
@@ -64,6 +65,8 @@ bool newSignalAssing = false;
 JsonArray devices; 
 JsonObject newEntry;
 
+// Wifi Credintials
+const char *ssid = "ESP32 Universal Remote";
 
 bool loadJsonFromFlash() {
   File file = LittleFS.open(filePath, "r");
@@ -136,6 +139,14 @@ void setup() {
   } else {
     devices = doc["Devices"].to<JsonArray>();
   }
+
+
+  // Wifi Start 
+  WiFi.softAP(ssid,NULL);
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("IP Address: ");
+  Serial.println(IP);
+
 }
 
 bool switchButtonClick() {
