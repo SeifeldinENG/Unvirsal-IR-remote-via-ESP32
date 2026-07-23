@@ -3,10 +3,9 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <WiFi.h>
+#include <WebServer.h>
 
 #define IRPin 15
-#define SWITCH 16
-#define SEND 17
 
 // Json saved file path in the esp32
 String filePath = "/Devices/devices.json";
@@ -15,15 +14,6 @@ String filePath = "/Devices/devices.json";
 int counter = 0;
 JsonDocument doc;
 JsonArray signals;
-
-// Button globar varibals
-bool switchButtonPrevState = true; // input pull up off by default
-bool sendButtonPrevState = true; // input pull up off by default
-
-// Buttons Debounce Variables
-unsigned long switchClickTime = 0;
-unsigned long sendClickTime = 0;
-int DEBOUNCE_MS = 30;
 
 // Global Selectors  
 String place[] = {"Living Room", " My Room"};
@@ -65,8 +55,12 @@ bool newSignalAssing = false;
 JsonArray devices; 
 JsonObject newEntry;
 
-// Wifi Credintials
-const char *ssid = "ESP32 Universal Remote";
+// Wifi name and passsword
+char *ssid = "WE_7A8A8B";
+char *password = "cb71f8ab";
+
+// Web Server Object at port 80
+WebServer server(80);
 
 bool loadJsonFromFlash() {
   File file = LittleFS.open(filePath, "r");
@@ -106,12 +100,52 @@ bool saveJsonToFlash() {
 
   return true;
 }
+
+void handle_getDevices() {
+  JsonDocument document;
+  JsonArray devices = document["Devices"].to<JsonArray>();
+
+  JsonObject entry1 = devices.add<JsonObject>();
+  entry1["Name"] = "Seif";
+  entry1["Type"] = "TV";
+
+  JsonObject entry2 = devices.add<JsonObject>();
+  entry2["Name"] = "Eldin";
+  entry2["Type"] = "TV";
+
+  JsonObject entry3 = devices.add<JsonObject>();
+  entry3["Name"] = "Osama";
+  entry3["Type"] = "AC";
+
+  JsonObject entry4 = devices.add<JsonObject>();
+  entry4["Name"] = "Ahmed";
+  entry4["Type"] = "AC";
+
+  JsonObject entry5 = devices.add<JsonObject>();
+  entry5["Name"] = "Khaled";
+  entry5["Type"] = "Others";
+
+  String jsonBuffer;
+  serializeJson(document, jsonBuffer);
+
+  server.send(200, "application/json", jsonBuffer);
+}
+
+void handle_sendSignal() {
+  // #TODO: Implment the /sendSignal EndPoint
+}
+
+void handle_learnSignal() {
+  // #TODO: Implment the /learnSignal EndPoint
+}
+
+void handle_addDevice() {
+  // #TODO: Implment the /addDevice EndPoint
+}
+
+
 void setup() {
   Serial.begin(115200);
-  
-  // Pin Modes
-  pinMode(SEND, INPUT_PULLUP);
-  pinMode(SWITCH, INPUT_PULLUP);
   
   // IrReceiver object 
   // ENABLE_LED_FEEDBACK uses the esp32 builtin LED
@@ -140,98 +174,34 @@ void setup() {
     devices = doc["Devices"].to<JsonArray>();
   }
 
+  // WiFi start
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to Wifi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
 
-  // Wifi Start 
-  WiFi.softAP(ssid,NULL);
-  IPAddress IP = WiFi.softAPIP();
+  Serial.println("");
+  Serial.println("Connected to wifi!");
+  
+  // Printing the IP address to the serial print
   Serial.print("IP Address: ");
-  Serial.println(IP);
+  Serial.println(WiFi.localIP());
 
-}
+  // Server start
+  server.on("/getDevices", handle_getDevices);  
+  server.on("/sendSignal", handle_sendSignal);  
+  server.on("/learnSignal", handle_learnSignal);  
+  server.on("/addDevice", handle_addDevice);  
 
-bool switchButtonClick() {
-  bool state = digitalRead(SWITCH);
-  if (state != switchButtonPrevState) {
-    switchClickTime = millis();
-    switchButtonPrevState = state;
-  }
+  server.begin();
+  Serial.println("Server Started!");
 
-  if ((millis() - switchClickTime > DEBOUNCE_MS) && !state) {
-      switchClickTime = millis();
-      return true;
-    }
-  return false;
-}
-
-bool sendButtonClick() {
-  bool state = digitalRead(SEND);
-  if (state != sendButtonPrevState) {
-    sendClickTime = millis();
-    sendButtonPrevState = state;
-  }
-
-  if ((millis() - sendClickTime > DEBOUNCE_MS) && !state) {
-      sendClickTime = millis();
-      return true;
-    }
-  return false;
-}
-void clearScreen() {
-  // Print empty lines as simulate clearing the screen
-  for (int i = 0; i < 30; i++) {
-    Serial.println();
-  }
-}
-void updateDisplay() {
-  clearScreen();
-
-  Serial.println("=========================================");
-  Serial.println("        IR SIGNAL CAPTURE MENU           ");
-  Serial.println("=========================================");
-
-  if (selector == PLACE) {
-    Serial.print("[>] PLACE: "); Serial.println(place[placeIndex]);
-  } else {
-    // print the place selected and if not selected for some reseaon just print the highlited one
-    Serial.print("    PLACE: "); Serial.println(newEntry["Place"] | place[placeIndex]); 
-  }
-
-if (selector == TYPE) {
-    Serial.print("[>] TYPE: "); Serial.println(type[typeIndex]);
-  } else {
-    Serial.print("    TYPE: "); Serial.println(newEntry["Type"] | type[typeIndex]); 
-  }
-
-if (selector == KEY) {
-    Serial.print("[>] KEY: "); 
-    switch (device) {
-      case (AC): Serial.println(AC_Key[ACIndex]); break;
-      case (TV): Serial.println(TV_Key[TVIndex]); break;
-      case (FAN): Serial.println(Fan_Key[FanIndex]); break;
-    }
-  } else {
-    Serial.print("    KEY: ");
-    if (newEntry["Key"]) {
-      Serial.println(newEntry["Key"].as<String>());
-    } else {
-      Serial.println("----");
-    }
-  }
-
-  Serial.println("=========================================");
-  Serial.println(" [SWITCH]: Next Item  |  [SEND]: Confirm ");
-  Serial.println("=========================================");
-}
-
-void waitForRelease() {
-  while (digitalRead(SWITCH) == LOW || digitalRead(SEND) == LOW) {
-    yield();
-  }
-  delay(30); // small delay time after release
 }
 
 bool signalAssign() {
-if (!IrReceiver.decode()) { return false; }
+  if (!IrReceiver.decode()) { return false; }
 
   if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
     IrReceiver.resume();
@@ -267,120 +237,6 @@ if (!IrReceiver.decode()) { return false; }
 }
 
 void loop() {
-  // Waiting for the switch key to be pressed first
-  // to enter assgin signal mode
-  if (!newSignalAssing) {
-    Serial.println("Enter the SWITCH button key to assign new signal.");
-    while (!digitalRead(SWITCH) == LOW) {
-      yield(); // tells the esp32 that its not stuck do not reset
-    }
-    waitForRelease();
-    newSignalAssing = true;
-    updateDisplay();
-    newEntry = devices.add<JsonObject>();
-  }
-
-  if (switchButtonClick()) {
-    // Updating the selector indexes
-    switch (selector) {
-      case (PLACE):
-        placeIndex = (placeIndex + 1) % placeNumber;
-        break;
-
-      case (TYPE):
-        typeIndex = (typeIndex + 1) % typeNumber;
-        break;
-      
-      case (KEY):
-        switch (device) {
-          case (AC):
-            ACIndex = (ACIndex + 1) % AC_KeyNumber;
-            break;
-
-          case (TV):
-            TVIndex = (TVIndex + 1) % TV_KeyNumber;
-            break;
-
-          case (FAN):
-            FanIndex = (FanIndex + 1) % Fan_KeyNumber;
-            break;
-        }
-    }
-    updateDisplay();
-    waitForRelease();
-  }
-
-  if (sendButtonClick()) {
-
-    //  Saving the Choosen variable in the JSON  
-    switch (selector) {
-      case (PLACE):
-        newEntry["Place"] = place[placeIndex]; 
-        selector = TYPE;
-        updateDisplay();
-        break;
-
-      case (TYPE):
-        newEntry["Type"] = type[typeIndex];
-        selector = KEY;
-        if (type[typeIndex] == "AC")       device = AC;
-        else if (type[typeIndex] == "TV")  device = TV;
-        else if (type[typeIndex] == "Fan") device = FAN;
-        updateDisplay();
-        break;
-
-      case (KEY):
-        switch (device) {
-          case (AC):
-            newEntry["Key"] = AC_Key[ACIndex];
-            break;
-            
-          case (TV):
-            newEntry["Key"] = TV_Key[TVIndex];
-            break;
-
-          case (FAN):
-            newEntry["Key"] = Fan_Key[FanIndex];
-            break;
-        }
-        // Ask to send the signal and wait
-        clearScreen();
-        Serial.println("=========================================");
-        Serial.println(" >>> WAITING FOR IR SIGNAL...           ");
-        Serial.println("=========================================");
-        Serial.println("Please direct the remote to the receiver");
-        Serial.println("and press the desired button.");
-        Serial.println("=========================================");
-
-        while (!signalAssign()) {
-          yield();
-        } 
-        // Printing the final Json
-        clearScreen();
-        Serial.println("=========================================");
-        Serial.println(" >>> SIGNAL SAVED SUCCESSFULLY!         ");
-        Serial.println("=========================================");
-        serializeJsonPretty(doc, Serial);
-        Serial.println("\n=========================================");
-        
-        // Reseting the choices
-        selector = PLACE;
-        placeIndex = 0;
-        typeIndex = 0;
-        ACIndex = 0;
-        TVIndex = 0;
-        FanIndex = 0;
-        newSignalAssing = false;
-
-        // Saving the Json in the memory
-        if (!saveJsonToFlash()) {
-          Serial.println("Failed to save the json in the memory!");
-        } else {
-          Serial.println("Saved the Json succesffully");
-        }
-        break;
-    }
-    waitForRelease();
-  }
+  server.handleClient();
 }
 
