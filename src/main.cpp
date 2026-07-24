@@ -10,11 +10,6 @@
 // Json saved file path in the esp32
 String filePath = "/Devices/devices.json";
 
-// Json Global Variables
-int counter = 0;
-JsonDocument doc;
-JsonArray signals;
-
 // Global Selectors  
 String place[] = {"Living Room", " My Room"};
 String type[] = {"AC", "TV", "Fan"};
@@ -48,13 +43,6 @@ enum DEVICE {
 SELECTOR selector = PLACE;
 DEVICE device = AC;
 
-// True if assigning a signal
-bool newSignalAssing = false;
-
-// JsonDocument Global Variable
-JsonArray devices; 
-JsonObject newEntry;
-
 // Wifi name and passsword
 char *ssid = "WE_7A8A8B";
 char *password = "cb71f8ab";
@@ -62,13 +50,15 @@ char *password = "cb71f8ab";
 // Web Server Object at port 80
 WebServer server(80);
 
-bool loadJsonFromFlash() {
-  File file = LittleFS.open(filePath, "r");
+JsonDocument loadJsonFromFlash(String path) {
+  File file = LittleFS.open(path, "r");
+  JsonDocument doc;
 
   if (!file) {
     Serial.println("Failed to open the file to read!");
-    return false;
+    return doc;
   }
+  
 
   DeserializationError error = deserializeJson(doc, file);
   file.close();
@@ -76,13 +66,13 @@ bool loadJsonFromFlash() {
   if (error) {
     Serial.print("Failed to deserialize the Json :");
     Serial.println(error.c_str());
-    return false;
+    return doc;
   }
 
-  return true;
+  return doc;
 }
 
-bool saveJsonToFlash() {
+bool saveJsonToFlash(JsonDocument &doc) {
   File file = LittleFS.open(filePath, "w");
 
   if (!file) {
@@ -100,6 +90,7 @@ bool saveJsonToFlash() {
 
   return true;
 }
+
 
 void handle_getDevices() {
   JsonDocument document;
@@ -140,7 +131,34 @@ void handle_learnSignal() {
 }
 
 void handle_addDevice() {
-  // #TODO: Implment the /addDevice EndPoint
+  // Set the query parameters Variables
+  String name = server.arg("Name");
+  String type = server.arg("Type");
+  
+  // Opening the file in the esp32
+  JsonDocument doc = loadJsonFromFlash(filePath);
+  JsonArray devices;
+
+  // Creating an array inside the json object variable
+  if (doc["Devices"].is<JsonArray>()) {
+    devices = doc["Devices"].as<JsonArray>();
+  } else {
+    devices = doc["Devices"].to<JsonArray>();
+  }
+  
+  // Adding the entries
+  JsonObject newEntry = devices.add<JsonObject>();
+
+  newEntry["Name"] = name;
+  newEntry["Type"] = type;
+
+  if (!saveJsonToFlash(doc)) {
+    Serial.println("Failed to save json to Flash!");
+  }
+
+  serializeJsonPretty(doc, Serial);
+
+  server.send(200);
 }
 
 
@@ -162,18 +180,18 @@ void setup() {
   }
 
   // Loading the JsonDocument from memory
-  bool loaded = loadJsonFromFlash(); 
+  // bool loaded = loadJsonFromFlash(); 
+  //
+  // if (!loaded) {
+  //   Serial.println("Failed to load the Json file!");
+  // }
 
-  if (!loaded) {
-    Serial.println("Failed to load the Json file!");
-  }
-
-  if (loaded && doc["Devices"].is<JsonArray>()) {
-    devices = doc["Devices"].as<JsonArray>();
-  } else {
-    devices = doc["Devices"].to<JsonArray>();
-  }
-
+  // if (loaded && doc["Devices"].is<JsonArray>()) {
+  //   devices = doc["Devices"].as<JsonArray>();
+  // } else {
+  //   devices = doc["Devices"].to<JsonArray>();
+  // }
+  
   // WiFi start
   WiFi.begin(ssid, password);
   Serial.println("Connecting to Wifi...");
@@ -200,41 +218,41 @@ void setup() {
 
 }
 
-bool signalAssign() {
-  if (!IrReceiver.decode()) { return false; }
-
-  if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
-    IrReceiver.resume();
-    return false;
-  }
-
-  String firstCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
-  IrReceiver.resume();
-
-  //Waiting for second signal
-  String secondCode = "";
-  unsigned long sentTime = millis();
-  while (millis() - sentTime < 150) {
-    if (IrReceiver.decode()) {
-        secondCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
-        IrReceiver.resume();
-        break;
-    }
-    IrReceiver.resume();
-    yield();
-  }
-
-  newEntry["Code1"] = firstCode;
-  if (secondCode != "") {
-    newEntry["Code2"] = secondCode;
-  } else {
-    newEntry["Code2"] = "";
-  }
-
-  // Resuming
-  IrReceiver.resume();
-  return true;
-}
+// bool signalAssign() {
+//   if (!IrReceiver.decode()) { return false; }
+//
+//   if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
+//     IrReceiver.resume();
+//     return false;
+//   }
+//
+//   String firstCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
+//   IrReceiver.resume();
+//
+//   //Waiting for second signal
+//   String secondCode = "";
+//   unsigned long sentTime = millis();
+//   while (millis() - sentTime < 150) {
+//     if (IrReceiver.decode()) {
+//         secondCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
+//         IrReceiver.resume();
+//         break;
+//     }
+//     IrReceiver.resume();
+//     yield();
+//   }
+//
+//   newEntry["Code1"] = firstCode;
+//   if (secondCode != "") {
+//     newEntry["Code2"] = secondCode;
+//   } else {
+//     newEntry["Code2"] = "";
+//   }
+//
+//   // Resuming
+//   IrReceiver.resume();
+//   return true;
+// }
 
 void loop() {
   server.handleClient();
