@@ -6,6 +6,7 @@
 #include <WebServer.h>
 
 #define IRPin 15
+#define SendingPIN 16
 
 // Json saved file path in the esp32
 String filePath = "/Devices/devices.json";
@@ -115,8 +116,7 @@ void createDocument(String name, String type) {
       JsonObject buttonsObject = buttons.add<JsonObject>();
       buttonsObject["Name"] = TV_Key[i];
       buttonsObject["Assigned"] = false;
-      buttonsObject["Code1"] = "";
-      buttonsObject["Code2"] = "";
+      buttonsObject["Code"] = "";
     } 
   } else if (type == "AC") {
 
@@ -128,8 +128,7 @@ void createDocument(String name, String type) {
     JsonObject buttonsObject = buttons.add<JsonObject>();
     buttonsObject["Name"] = "";
     buttonsObject["Assigned"] = false;
-    buttonsObject["Code1"] = "";
-    buttonsObject["Code2"] = "";
+    buttonsObject["Code"] = "";
   } else {
 
     // Adding the entries
@@ -140,8 +139,7 @@ void createDocument(String name, String type) {
     JsonObject buttonsObject = buttons.add<JsonObject>();
     buttonsObject["Name"] = "";
     buttonsObject["Assigned"] = false;
-    buttonsObject["Code1"] = "";
-    buttonsObject["Code2"] = "";
+    buttonsObject["Code"] = "";
   }
 
   if (!saveJsonToFlash(doc)) {
@@ -151,40 +149,38 @@ void createDocument(String name, String type) {
 }
 
 bool signalAssign(String name, String type, String buttonName) {
-  if (!IrReceiver.decode()) { 
+  if (!IrReceiver.decode()) {
     return false;
   }
-
 
   if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
     IrReceiver.resume();
     return false;
   }
-  Serial.println("SignalFound!");
 
-  String firstCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
-  IrReceiver.resume();
+  // التعديل هنا: استخدام IrReceiver.irparams بدلاً من decodedIRData.rawDataPtr
+  uint16_t rawLen = IrReceiver.irparams.rawlen;
 
-  //Waiting for second signal
-  String secondCode = "";
-  unsigned long sentTime = millis();
-  while (millis() - sentTime < 150) {
-    if (IrReceiver.decode()) {
-        secondCode = String(IrReceiver.decodedIRData.decodedRawData, HEX);
-        IrReceiver.resume();
-        break;
-    }
+  // Reject clearly too-short captures (noise)
+  if (rawLen < 10) {
     IrReceiver.resume();
-    yield();
+    return false;
   }
 
-  // Resuming
+  Serial.println("SignalFound! rawLen = " + String(rawLen));
+
+  // Copy raw timings BEFORE calling resume() - resume() reuses the buffer
+  uint16_t pulseCount = rawLen - 1; // first entry is the initial gap, skip it
+  uint16_t rawTimings[pulseCount];
+  for (uint16_t i = 1; i < rawLen; i++) {
+    // التعديل هنا أيضاً
+    rawTimings[i - 1] = IrReceiver.irparams.rawbuf[i] * MICROS_PER_TICK;
+  }
+
   IrReceiver.resume();
 
   JsonDocument doc = loadJsonFromFlash(filePath);
   JsonArray devices;
-
-  // Creating an array inside the json object variable
   if (doc["Devices"].is<JsonArray>()) {
     devices = doc["Devices"].as<JsonArray>();
   } else {
@@ -208,16 +204,30 @@ bool signalAssign(String name, String type, String buttonName) {
     }
   }
 
-  selectedButton["Code1"] = firstCode;
-  if (secondCode != "") {
-    selectedButton["Code2"] = secondCode;
-  } else {
-    selectedButton["Code2"] = "";
+  // Overwrite any previous raw code for this button
+  selectedButton.remove("RawCode");
+  JsonArray rawArray = selectedButton["RawCode"].to<JsonArray>();
+  for (uint16_t i = 0; i < pulseCount; i++) {
+    rawArray.add(rawTimings[i]);
   }
   selectedButton["Assigned"] = true;
+
   saveJsonToFlash(doc);
   serializeJsonPretty(doc, Serial);
   return true;
+}
+
+void sendSignal(JsonObject buttonObject) {
+  JsonArray rawArray = buttonObject["RawCode"].as<JsonArray>();
+  uint16_t len = rawArray.size();
+
+  uint16_t rawData[len];
+  for (uint16_t i = 0; i < len; i++) {
+    rawData[i] = rawArray[i].as<uint16_t>();
+  }
+
+  Serial.println("Sending raw signal, " + String(len) + " pulses");
+  IrSender.sendRaw(rawData, len, 38); // 38kHz - standard for ~99% of consumer IR remotes
 }
 
 
@@ -260,7 +270,40 @@ void handle_getButtons() {
 }
 
 void handle_sendSignal() {
-  // #TODO: Implment the /sendSignal EndPoint
+  // Set the query parameters variables
+  String name = server.arg("Name");
+  String type = server.arg("Type");
+  String buttonName = server.arg("buttonName");
+
+  JsonDocument doc = loadJsonFromFlash(filePath);
+  JsonArray devices;
+
+  // Creating an array inside the json object variable
+  if (doc["Devices"].is<JsonArray>()) {
+    devices = doc["Devices"].as<JsonArray>();
+  } else {
+    devices = doc["Devices"].to<JsonArray>();
+  }
+
+  JsonObject selectedEntry;
+  for (JsonObject entry : devices) {
+    if (entry["Name"] == name && entry["Type"] == type) {
+      selectedEntry = entry;
+      break;
+    }
+  }
+
+  JsonObject selectedButton;
+  JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
+  for (JsonObject entry : buttons) {
+    if (entry["Name"] == buttonName) {
+      selectedButton = entry;
+      break;
+    }
+  }
+  
+  sendSignal(selectedButton);
+  server.send(200);
 }
 
 void handle_learnSignal() {
@@ -327,6 +370,7 @@ void setup() {
   // ENABLE_LED_FEEDBACK uses the esp32 builtin LED
   // AS an indicator that a signal was picked
   IrReceiver.begin(IRPin, ENABLE_LED_FEEDBACK);
+  IrSender.begin(SendingPIN);
 
   // LittleFS filesystem mounting
   if (!LittleFS.begin(true)) {
