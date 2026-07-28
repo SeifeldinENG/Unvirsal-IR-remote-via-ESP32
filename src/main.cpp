@@ -18,8 +18,7 @@ String filePath = "/Devices/devices.json";
 String TV_Key[] = {"Power", "Source", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
 "Nine", "Mute", "Zero", "Channel_List", "Volume_UP", "Arrow_UP", "Channel_Next", "Arrow_Left", "OK", "Arrow_Right", "Volume_Down", "Arrow_Down",
 "Channel_Prev", "Back", "Exit", "A", "B", "C", "D", "P_Back", "Resume", "Pause", "P_Forward"};
-// String Fan_Key[] = {"Power UP", "Power OFF", "Speed"};
-
+String AC_Key[] =  {"Preset1", "Preset2", "Preset3", "Preset4", "Preset5", "Preset6", "Preset7", "Preset8", "Preset9", "OFF"}; 
 // int placeIndex = 0;
 // int typeIndex = 0; int ACIndex = 0;
 // int TVIndex = 0;
@@ -27,7 +26,7 @@ String TV_Key[] = {"Power", "Source", "One", "Two", "Three", "Four", "Five", "Si
 //
 // int placeNumber = sizeof(place) / sizeof(place[0]);
 // int typeNumber = sizeof(type) / sizeof(type[0]);
-// int AC_KeyNumber = sizeof(AC_Key) / sizeof(AC_Key[0]);
+int AC_KeyNumber = sizeof(AC_Key) / sizeof(AC_Key[0]);
 int TVKeysNumber = sizeof(TV_Key) / sizeof(TV_Key[0]);
 // int Fan_KeyNumber = sizeof(Fan_Key) / sizeof(Fan_Key[0]);
 //
@@ -116,7 +115,6 @@ void createDocument(String name, String type) {
       JsonObject buttonsObject = buttons.add<JsonObject>();
       buttonsObject["Name"] = TV_Key[i];
       buttonsObject["Assigned"] = false;
-      buttonsObject["Code"] = "";
     } 
   } else if (type == "AC") {
 
@@ -124,11 +122,12 @@ void createDocument(String name, String type) {
     JsonObject newEntry = devices.add<JsonObject>();
     newEntry["Name"] = name;
     newEntry["Type"] = type;
-    JsonArray buttons = newEntry["Buttons"].to<JsonArray>();
-    JsonObject buttonsObject = buttons.add<JsonObject>();
-    buttonsObject["Name"] = "";
-    buttonsObject["Assigned"] = false;
-    buttonsObject["Code"] = "";
+    JsonArray presets = newEntry["Presets"].to<JsonArray>();
+    for (int i = 0; i < AC_KeyNumber; i++) {
+      JsonObject buttonsObject = presets.add<JsonObject>();
+      buttonsObject["Name"] = AC_Key[i];
+      buttonsObject["Assigned"] = false;
+    }
   } else {
 
     // Adding the entries
@@ -139,7 +138,6 @@ void createDocument(String name, String type) {
     JsonObject buttonsObject = buttons.add<JsonObject>();
     buttonsObject["Name"] = "";
     buttonsObject["Assigned"] = false;
-    buttonsObject["Code"] = "";
   }
 
   if (!saveJsonToFlash(doc)) {
@@ -148,7 +146,7 @@ void createDocument(String name, String type) {
   serializeJsonPretty(doc, Serial);
 }
 
-bool signalAssign(String name, String type, String buttonName) {
+bool signalAssign(String name, String type, JsonObject selected) {
   if (!IrReceiver.decode()) {
     return false;
   }
@@ -158,62 +156,30 @@ bool signalAssign(String name, String type, String buttonName) {
     return false;
   }
 
-  // التعديل هنا: استخدام IrReceiver.irparams بدلاً من decodedIRData.rawDataPtr
   uint16_t rawLen = IrReceiver.irparams.rawlen;
 
-  // Reject clearly too-short captures (noise)
-  if (rawLen < 10) {
+  if (rawLen < 30) {
     IrReceiver.resume();
     return false;
   }
 
   Serial.println("SignalFound! rawLen = " + String(rawLen));
 
-  // Copy raw timings BEFORE calling resume() - resume() reuses the buffer
   uint16_t pulseCount = rawLen - 1; // first entry is the initial gap, skip it
   uint16_t rawTimings[pulseCount];
   for (uint16_t i = 1; i < rawLen; i++) {
-    // التعديل هنا أيضاً
     rawTimings[i - 1] = IrReceiver.irparams.rawbuf[i] * MICROS_PER_TICK;
   }
 
   IrReceiver.resume();
 
-  JsonDocument doc = loadJsonFromFlash(filePath);
-  JsonArray devices;
-  if (doc["Devices"].is<JsonArray>()) {
-    devices = doc["Devices"].as<JsonArray>();
-  } else {
-    devices = doc["Devices"].to<JsonArray>();
-  }
-
-  JsonObject selectedEntry;
-  for (JsonObject entry : devices) {
-    if (entry["Name"] == name && entry["Type"] == type) {
-      selectedEntry = entry;
-      break;
-    }
-  }
-
-  JsonObject selectedButton;
-  JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
-  for (JsonObject entry : buttons) {
-    if (entry["Name"] == buttonName) {
-      selectedButton = entry;
-      break;
-    }
-  }
-
-  // Overwrite any previous raw code for this button
-  selectedButton.remove("RawCode");
-  JsonArray rawArray = selectedButton["RawCode"].to<JsonArray>();
+  selected.remove("RawCode");
+  JsonArray rawArray = selected["RawCode"].to<JsonArray>();
   for (uint16_t i = 0; i < pulseCount; i++) {
     rawArray.add(rawTimings[i]);
   }
-  selectedButton["Assigned"] = true;
+  selected["Assigned"] = true;
 
-  saveJsonToFlash(doc);
-  serializeJsonPretty(doc, Serial);
   return true;
 }
 
@@ -262,11 +228,17 @@ void handle_getButtons() {
       break;
     }
   }
-
-  JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
-  String buttonsJson;
-  serializeJson(buttons, buttonsJson);
-  server.send(200, "application/json", buttonsJson);
+  if (type == "AC") {
+    JsonArray presets = selectedEntry["Presets"].as<JsonArray>();
+    String presetsJson;
+    serializeJson(presets, presetsJson);
+    server.send(200, "application/json", presetsJson);
+  } else if (type == "TV") {
+    JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
+    String buttonsJson;
+    serializeJson(buttons, buttonsJson);
+    server.send(200, "application/json", buttonsJson);
+  }
 }
 
 void handle_sendSignal() {
@@ -293,16 +265,26 @@ void handle_sendSignal() {
     }
   }
 
-  JsonObject selectedButton;
-  JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
-  for (JsonObject entry : buttons) {
-    if (entry["Name"] == buttonName) {
-      selectedButton = entry;
-      break;
+  JsonObject selected;
+  if (server.hasArg("Preset")) {
+    JsonArray presets = selectedEntry["Presets"].as<JsonArray>();
+    for (JsonObject entry : presets) {
+      if (entry["Name"] == server.arg("Preset")) {
+        selected = entry;
+        break;
+      }
+    }
+  } else if (server.hasArg("buttonName")) {
+    JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
+    for (JsonObject entry : buttons) {
+      if (entry["Name"] == server.arg("buttonName")) {
+        selected = entry;
+        break;
+      }
     }
   }
   
-  sendSignal(selectedButton);
+  sendSignal(selected);
   server.send(200);
 }
 
@@ -310,15 +292,58 @@ void handle_learnSignal() {
   // Set the query parameters variables
   String name = server.arg("Name");
   String type = server.arg("Type");
-  String buttonName = server.arg("buttonName");
 
-  // Serial.println("Name: " + name);
-  // Serial.println("Type: " + type);
-  // Serial.println("button Name: " + buttonName);
-  
-  while (!signalAssign(name, type, buttonName)) {
+  JsonDocument doc = loadJsonFromFlash(filePath);
+  JsonArray devices;
+  if (doc["Devices"].is<JsonArray>()) {
+    devices = doc["Devices"].as<JsonArray>();
+  } else {
+    devices = doc["Devices"].to<JsonArray>();
+  }
+
+  JsonObject selectedEntry;
+  for (JsonObject entry : devices) {
+    if (entry["Name"] == name && entry["Type"] == type) {
+      selectedEntry = entry;
+      break;
+    }
+  }
+
+  JsonObject selected;
+  if (type == "TV" && server.hasArg("buttonName")) {
+    String buttonName = server.arg("buttonName");
+    JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
+    for (JsonObject entry : buttons) {
+      if (entry["Name"] == buttonName) {
+        selected = entry;
+        break;
+      }
+    }
+  } else if (type == "AC" && server.hasArg("Preset")) {
+    String preset = server.arg("Preset");
+    JsonArray presets = selectedEntry["Presets"].as<JsonArray>();
+    for (JsonObject entry : presets) {
+      if (entry["Name"] == preset) {
+        selected = entry;
+        break;
+      }
+    }
+
+    if (preset != "OFF") {
+      selected["Temp"] = server.arg("Temp");
+      selected["Speed"] = server.arg("Speed");
+      selected["Mode"] = server.arg("Mode");
+      selected["HorSwing"] = server.arg("HorSwing");
+      selected["VerSwing"] = server.arg("VerSwing");
+    }
+  }
+
+  while (!signalAssign(name, type, selected)) {
     yield();
   }
+
+  saveJsonToFlash(doc);
+  serializeJsonPretty(doc, Serial);
 
   server.send(200);
 }
