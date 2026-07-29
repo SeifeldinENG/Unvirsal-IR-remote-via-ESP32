@@ -5,8 +5,12 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-#define IRPin 15
+#define IRPin 26 
 #define SendingPIN 16
+#define wifiLED 15
+
+// wifiLED statue
+bool LEDstatus = false;
 
 // Json saved file path in the esp32
 String filePath = "/Devices/devices.json";
@@ -136,7 +140,6 @@ void createDocument(String name, String type) {
   if (!saveJsonToFlash(doc)) {
     Serial.println("Failed to save json to Flash!");
   }
-  serializeJsonPretty(doc, Serial);
 }
 
 bool signalAssign(String name, String type, JsonObject selected) {
@@ -351,7 +354,6 @@ void handle_learnSignal() {
   }
 
   saveJsonToFlash(doc);
-  serializeJsonPretty(doc, Serial);
 
   server.send(200);
 }
@@ -392,7 +394,6 @@ void handle_deleteDevice() {
   }
 
   saveJsonToFlash(doc);
-  serializeJsonPretty(doc, Serial);
   server.send(200);
 }
 
@@ -439,6 +440,7 @@ void setup() {
   // AS an indicator that a signal was picked
   IrReceiver.begin(IRPin, ENABLE_LED_FEEDBACK);
   IrSender.begin(SendingPIN);
+  pinMode(wifiLED, OUTPUT);
 
   // LittleFS filesystem mounting
   if (!LittleFS.begin(true)) {
@@ -457,30 +459,17 @@ void setup() {
       f.close();
     }
 }
-  // Loading the JsonDocument from memory
-  // bool loaded = loadJsonFromFlash(); 
-  //
-  // if (!loaded) {
-  //   Serial.println("Failed to load the Json file!");
-  // }
-
-  // if (loaded && doc["Devices"].is<JsonArray>()) {
-  //   devices = doc["Devices"].as<JsonArray>();
-  // } else {
-  //   devices = doc["Devices"].to<JsonArray>();
-  // }
   
   // WiFi start
+  
   WiFi.begin(ssid, password);
-  Serial.println("Connecting to Wifi...");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    LEDstatus = !LEDstatus;
+    digitalWrite(wifiLED, LEDstatus);
   }
+  digitalWrite(wifiLED, HIGH);
 
-  Serial.println("");
-  Serial.println("Connected to wifi!");
-  
   // Printing the IP address to the serial print
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
@@ -501,5 +490,10 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  if (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(wifiLED, LOW);
+  } else {
+    digitalWrite(wifiLED, HIGH);
+  }
 }
 
