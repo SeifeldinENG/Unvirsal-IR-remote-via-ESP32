@@ -12,24 +12,14 @@
 String filePath = "/Devices/devices.json";
 
 // Global Selectors  
-// String place[] = {"Living Room", " My Room"};
-// String type[] = {"AC", "TV", "Fan"};
-// String AC_Key[] = {"Power UP", "Power OFF", "Plus", "Minus"};
 String TV_Key[] = {"Power", "Source", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
 "Nine", "Mute", "Zero", "Channel_List", "Volume_UP", "Arrow_UP", "Channel_Next", "Arrow_Left", "OK", "Arrow_Right", "Volume_Down", "Arrow_Down",
 "Channel_Prev", "Back", "Exit", "A", "B", "C", "D", "P_Back", "Resume", "Pause", "P_Forward"};
 String AC_Key[] =  {"Preset1", "Preset2", "Preset3", "Preset4", "Preset5", "Preset6", "Preset7", "Preset8", "Preset9", "OFF"}; 
-// int placeIndex = 0;
-// int typeIndex = 0; int ACIndex = 0;
-// int TVIndex = 0;
-// int FanIndex = 0;
-//
-// int placeNumber = sizeof(place) / sizeof(place[0]);
-// int typeNumber = sizeof(type) / sizeof(type[0]);
+String Others_Key[] = {"Power", "Home", "Menu", "OK", "Up", "Down", "Left", "Right", "Volume_Up", "Volume_Down", "Mute", "Return", "Exit", "Settings", "Info"};
 int AC_KeyNumber = sizeof(AC_Key) / sizeof(AC_Key[0]);
 int TVKeysNumber = sizeof(TV_Key) / sizeof(TV_Key[0]);
-// int Fan_KeyNumber = sizeof(Fan_Key) / sizeof(Fan_Key[0]);
-//
+int Others_KeyNumber = sizeof(Others_Key) / sizeof(Others_Key[0]);
 // enum SELECTOR {
 //   PLACE,
 //   TYPE,
@@ -135,9 +125,12 @@ void createDocument(String name, String type) {
     newEntry["Name"] = name;
     newEntry["Type"] = type;
     JsonArray buttons = newEntry["Buttons"].to<JsonArray>();
-    JsonObject buttonsObject = buttons.add<JsonObject>();
-    buttonsObject["Name"] = "";
-    buttonsObject["Assigned"] = false;
+
+    for (int i = 0; i < Others_KeyNumber; i++) {
+      JsonObject buttonsObject = buttons.add<JsonObject>();
+      buttonsObject["Name"] = Others_Key[i];
+      buttonsObject["Assigned"] = false;
+    } 
   }
 
   if (!saveJsonToFlash(doc)) {
@@ -158,7 +151,7 @@ bool signalAssign(String name, String type, JsonObject selected) {
 
   uint16_t rawLen = IrReceiver.irparams.rawlen;
 
-  if (rawLen < 30) {
+  if (rawLen < 40) {
     IrReceiver.resume();
     return false;
   }
@@ -208,13 +201,10 @@ void handle_getDevices() {
 }
 
 void handle_getButtons() {
-  // Set the query parameters variables
   String name = server.arg("Name");
   String type = server.arg("Type");
-
   JsonDocument doc = loadJsonFromFlash(filePath);
   JsonArray devices;
-
   if (doc["Devices"].is<JsonArray>()) {
     devices = doc["Devices"].as<JsonArray>();
   } else {
@@ -228,16 +218,25 @@ void handle_getButtons() {
       break;
     }
   }
+
+  if (selectedEntry.isNull()) {
+    Serial.printf("No device found for Name=%s Type=%s\n", name.c_str(), type.c_str());
+    server.send(404, "application/json", "{\"error\":\"device not found\"}");
+    return;
+  }
+
   if (type == "AC") {
     JsonArray presets = selectedEntry["Presets"].as<JsonArray>();
     String presetsJson;
     serializeJson(presets, presetsJson);
     server.send(200, "application/json", presetsJson);
-  } else if (type == "TV") {
+  } else if (type == "TV" || type == "Others") {
     JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
     String buttonsJson;
     serializeJson(buttons, buttonsJson);
     server.send(200, "application/json", buttonsJson);
+  } else {
+    server.send(400, "application/json", "{\"error\":\"unknown type\"}");
   }
 }
 
@@ -336,6 +335,15 @@ void handle_learnSignal() {
       selected["HorSwing"] = server.arg("HorSwing");
       selected["VerSwing"] = server.arg("VerSwing");
     }
+  } else {
+    String buttonName = server.arg("buttonName");
+    JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
+    for (JsonObject entry : buttons) {
+      if (entry["Name"] == buttonName) {
+        selected = entry;
+        break;
+      }
+    }
   }
 
   while (!signalAssign(name, type, selected)) {
@@ -385,6 +393,41 @@ void handle_deleteDevice() {
 
   saveJsonToFlash(doc);
   serializeJsonPretty(doc, Serial);
+  server.send(200);
+}
+
+void handle_addCustomButton() {
+
+  // Set the query parameters variables
+  String name = server.arg("Name");
+  String type = server.arg("Type");
+
+  JsonDocument doc = loadJsonFromFlash(filePath);
+  JsonArray devices;
+
+  // Creating an array inside the json object variable
+  if (doc["Devices"].is<JsonArray>()) {
+    devices = doc["Devices"].as<JsonArray>();
+  } else {
+    devices = doc["Devices"].to<JsonArray>();
+  }
+
+  JsonObject selectedEntry;
+  for (JsonObject entry : devices) {
+    if (entry["Name"] == name && entry["Type"] == type) {
+      selectedEntry = entry;
+      break;
+    }
+  }
+
+  JsonArray buttons = selectedEntry["Buttons"].as<JsonArray>();
+  JsonObject selected = buttons.add<JsonObject>();
+  selected["Name"] = server.arg("buttonName");
+  selected["customNumber"] = server.arg("whichCustom");
+  selected["Assigned"] = true;
+
+  saveJsonToFlash(doc);
+
   server.send(200);
 }
 
@@ -449,6 +492,7 @@ void setup() {
   server.on("/addDevice", handle_addDevice);  
   server.on("/deleteDevice", handle_deleteDevice);
   server.on("/getButtons", handle_getButtons);
+  server.on("/addCustomButton", handle_addCustomButton);
 
   server.begin();
   Serial.println("Server Started!");
