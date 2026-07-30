@@ -40,8 +40,8 @@ int Others_KeyNumber = sizeof(Others_Key) / sizeof(Others_Key[0]);
 // DEVICE device = AC;
 
 // Wifi name and passsword
-char *ssid = "WE_7A8A8B";
-char *password = "cb71f8ab";
+char *ssid = "YOUR_WIFI_NAME";
+char *password = "YOUR_WIFI_PASSWORD";
 
 // Web Server Object at port 80
 WebServer server(80);
